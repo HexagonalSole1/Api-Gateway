@@ -59,9 +59,9 @@ public class JwtAuthenticationFilter extends AbstractGatewayFilterFactory<JwtAut
     private boolean shouldSkipAuthentication(ServerWebExchange exchange) {
         String path = exchange.getRequest().getPath().value();
 
-        // Rutas que NO necesitan autenticación
         return path.startsWith("/auth/login") ||
                 path.startsWith("/auth/register") ||
+                path.startsWith("/auth/authenticate") ||
                 path.startsWith("/actuator/health") ||
                 path.startsWith("/actuator/info");
     }

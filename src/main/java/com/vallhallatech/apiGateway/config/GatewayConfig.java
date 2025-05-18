@@ -18,29 +18,23 @@ public class GatewayConfig {
         this.globalLoggingFilter = globalLoggingFilter;
     }
 
-    @Bean
-    public RouteLocator customRouteLocator(RouteLocatorBuilder builder) {
-        return builder.routes()
-                // Rutas públicas
-                .route("auth-public", r -> r.path("/auth/login", "/auth/register")
-                        .uri("lb://auth-service"))
-
-                // Rutas protegidas del auth-service
-                .route("auth-protected", r -> r.path("/auth/**")
-                        .filters(f -> f.stripPrefix(1)
-                                .filter(jwtAuthenticationFilter.apply(new JwtAuthenticationFilter.Config())))
-                        .uri("lb://auth-service"))
-
-                // Microservicio de usuarios
-                .route("user-service", r -> r.path("/api/users/**")
-                        .filters(f -> f.stripPrefix(2)
-                                .filter(jwtAuthenticationFilter.apply(new JwtAuthenticationFilter.Config())))
-                        .uri("lb://user-service"))
-
-                // Actuator endpoints
-                .route("actuator", r -> r.path("/actuator/**")
-                        .uri("lb://api-gateway"))
-
-                .build();
-    }
+//    @Bean
+//    public RouteLocator customRouteLocator(RouteLocatorBuilder builder) {
+//        return builder.routes()
+//                // ✅ RUTAS PÚBLICAS con rewrite
+//                .route("auth-public", r -> r
+//                        .path("/auth/login", "/auth/register", "/auth/authenticate")
+//                        .filters(f -> f.rewritePath("/auth/(.*)", "/api/auth/$1"))  // ✅ Clave!
+//                        .uri("lb://auth-service"))  // ✅ Nombre correcto
+//
+//                // ✅ RUTAS PROTEGIDAS con rewrite
+//                .route("auth-protected", r -> r
+//                        .path("/auth/**")
+//                        .filters(f -> f
+//                                .rewritePath("/auth/(.*)", "/api/auth/$1")  // ✅ Reescribir
+//                                .filter(jwtAuthenticationFilter.apply(new JwtAuthenticationFilter.Config())))
+//                        .uri("lb://auth-service"))
+//
+//                .build();
+//    }
 }
