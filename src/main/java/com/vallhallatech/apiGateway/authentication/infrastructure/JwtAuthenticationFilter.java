@@ -73,7 +73,8 @@ public class JwtAuthenticationFilter extends AbstractGatewayFilterFactory<JwtAut
         String body = String.format("{\"error\":\"%s\",\"timestamp\":\"%s\"}",
                 message, java.time.Instant.now());
 
-        var buffer = exchange.getResponse().bufferFactory().wrap(body.getBytes());
+        org.springframework.core.io.buffer.DataBuffer buffer =
+                exchange.getResponse().bufferFactory().wrap(body.getBytes());
         return exchange.getResponse().writeWith(Mono.just(buffer));
     }
 
