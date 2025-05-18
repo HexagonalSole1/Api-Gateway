@@ -31,7 +31,7 @@ public class GlobalLoggingFilter implements GlobalFilter, Ordered {
 
         // Extraer información de la petición
         ServerHttpRequest request = exchange.getRequest();
-        String method = request.getMethod().name(); // Corrección: getMethod().name()
+        String method = request.getMethod() != null ? request.getMethod().name() : "UNKNOWN";
         String path = request.getPath().value();
         String clientIp = getClientIp(request);
         String userId = request.getHeaders().getFirst("X-User-Id");
@@ -51,10 +51,10 @@ public class GlobalLoggingFilter implements GlobalFilter, Ordered {
         // Tiempo de inicio
         long startTime = System.currentTimeMillis();
 
-        // Continuar con la cadena de filtros
-        return chain.filter(exchange).then(
-                Mono.fromRunnable(() -> {
-                    // Log de salida
+        // CORRECCIÓN: Usar doOnSuccess() y doOnError() en lugar de then() y onErrorResume()
+        return chain.filter(exchange)
+                .doOnSuccess(aVoid -> {
+                    // Log de salida exitosa
                     long endTime = System.currentTimeMillis();
                     int statusCode = exchange.getResponse().getStatusCode() != null ?
                             exchange.getResponse().getStatusCode().value() : 0;
@@ -62,11 +62,10 @@ public class GlobalLoggingFilter implements GlobalFilter, Ordered {
                     String targetService = extractTargetService(path);
                     loggingService.logOutgoingResponse(requestId, statusCode, endTime - startTime, targetService);
                 })
-        ).onErrorResume(throwable -> {
-            // Log de error
-            loggingService.logError(requestId, "Gateway processing error", throwable);
-            return Mono.error(throwable);
-        });
+                .doOnError(throwable -> {
+                    // Log de error
+                    loggingService.logError(requestId, "Gateway processing error", throwable);
+                });
     }
 
     private String getClientIp(ServerHttpRequest request) {

@@ -1,6 +1,4 @@
 package com.vallhallatech.apiGateway.config;
-
-
 import com.vallhallatech.apiGateway.authentication.infrastructure.JwtAuthenticationFilter;
 import com.vallhallatech.apiGateway.logging.infrastructure.GlobalLoggingFilter;
 import org.springframework.cloud.gateway.route.RouteLocator;
@@ -12,9 +10,12 @@ import org.springframework.context.annotation.Configuration;
 public class GatewayConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final GlobalLoggingFilter globalLoggingFilter;
 
-    public GatewayConfig(JwtAuthenticationFilter jwtAuthenticationFilter) {
+    public GatewayConfig(JwtAuthenticationFilter jwtAuthenticationFilter,
+                         GlobalLoggingFilter globalLoggingFilter) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
+        this.globalLoggingFilter = globalLoggingFilter;
     }
 
     @Bean
