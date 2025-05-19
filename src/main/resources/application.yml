@@ -6,8 +6,3 @@ spring:
 
   config:
     import: configserver:http://localhost:8888
-
-
-# JWT Configuration - AGREGAR ESTA SECCIÓN
-jwt:
-  secret: tuClaveSecretaSuperSegura123456789
