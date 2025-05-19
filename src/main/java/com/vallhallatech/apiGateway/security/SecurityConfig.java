@@ -65,7 +65,7 @@ public class SecurityConfig {
                 .authorizeExchange(exchanges -> exchanges
                         // 🟢 Rutas públicas (permitir sin autenticación)
                         .pathMatchers(HttpMethod.OPTIONS).permitAll()
-                        .pathMatchers("/auth/**", "/public/**").permitAll()
+                        .pathMatchers("/auth-service/auth/**", "/public/**").permitAll()
                         .pathMatchers("/actuator/health", "/actuator/info", "/actuator/**").permitAll()
 
                         // 🔒 Rutas que requieren roles específicos
@@ -77,6 +77,9 @@ public class SecurityConfig {
                         .pathMatchers("/api/profile/**").hasAnyRole("USER", "ADMIN")
                         .pathMatchers("/api/users/**").hasAnyRole("USER", "ADMIN")
                         .pathMatchers("/api/notifications/**").authenticated()
+
+                        //profile-service
+                        .pathMatchers("/profile-service/**").authenticated()
 
                         // 🔒 Todo lo demás requiere autenticación
                         .anyExchange().authenticated()
