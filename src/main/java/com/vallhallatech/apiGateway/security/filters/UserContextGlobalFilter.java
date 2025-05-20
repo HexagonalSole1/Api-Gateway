@@ -29,7 +29,9 @@ public class UserContextGlobalFilter implements GlobalFilter, Ordered {
                     // Extraer información del usuario autenticado
                     JwtUserPrincipal principal = (JwtUserPrincipal) authentication.getPrincipal();
 
-                    System.out.println("🟢 Adding user headers for: " + principal.getUsername());
+                    System.out.println("🟢 Adding user headers for: " + principal.getUsername() +  " " + principal.getRoles()
+                    + " " + principal.getUserId()
+                    );
 
                     // Crear exchange modificado con headers adicionales
                     ServerWebExchange modifiedExchange = exchange.mutate()
