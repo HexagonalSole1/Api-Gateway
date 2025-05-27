@@ -67,6 +67,7 @@ public class SecurityConfig {
                         .pathMatchers(HttpMethod.OPTIONS).permitAll()
                         .pathMatchers("/auth-service/auth/**", "/public/**").permitAll()
                         .pathMatchers("/actuator/health", "/actuator/info", "/actuator/**").permitAll()
+                        .pathMatchers(HttpMethod.GET,"/product-service/products/**").permitAll()
 
                         // 🔒 Rutas que requieren roles específicos
                         .pathMatchers("/api/admin/**").hasRole("ADMIN")
