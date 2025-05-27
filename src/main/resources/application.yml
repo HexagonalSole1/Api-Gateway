@@ -2,5 +2,5 @@ spring:
   application:
     name: api-gateway
   profiles:
-    active: qa
-    import: configserver:http://34.239.38.109:8888
+    active: dev
+    import: configserver:http://34.239.38.109/
