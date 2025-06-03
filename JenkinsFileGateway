@@ -1,3 +1,8 @@
+
+// ==========================================
+// JENKINSFILE PARA API GATEWAY CON SYSTEMD
+// ==========================================
+
 pipeline {
     agent any
 
@@ -5,12 +10,10 @@ pipeline {
         maven 'Maven'
     }
 
-    // ✅ SOLO TRIGGER POR PUSH
     triggers {
         githubPush()
     }
 
-    // ✅ OPCIONES DEL PIPELINE
     options {
         disableConcurrentBuilds()
         timeout(time: 30, unit: 'MINUTES')
@@ -18,30 +21,18 @@ pipeline {
     }
 
     environment {
-        // Detectar rama automáticamente
         BRANCH_NAME = "${env.GIT_BRANCH?.replaceAll('origin/', '') ?: env.BRANCH_NAME ?: 'dev'}"
-
-        // Variables de entorno según la rama
         ENV = "${env.BRANCH_NAME == 'main' ? 'prod' : env.BRANCH_NAME}"
-
-        // Puertos según entorno
         GATEWAY_PORT = "${env.BRANCH_NAME == 'main' ? '8080' : env.BRANCH_NAME == 'qa' ? '8081' : '8082'}"
-        EUREKA_PORT = "${env.BRANCH_NAME == 'main' ? '8761' : env.BRANCH_NAME == 'qa' ? '8762' : '8763'}"
 
-        // Configuración de EC2 según el entorno
         EC2_USER = 'ubuntu'
         EC2_IP_DEV = '35.168.222.61'
         EC2_IP_QA = '54.161.193.236'
-        EC2_IP_PROD = '34.227.172.83'
+        EC2_IP_PROD = '44.201.192.109'
 
-
-        // Rutas de despliegue en EC2
         REMOTE_PATH = '/home/ubuntu/api-gateway'
-
-        // Credenciales
         SSH_KEY = credentials('ssh-key-ec2')
 
-        // Variables para Java 21
         JDK_DIR = "${WORKSPACE}/jdk21"
         JAVA_HOME = "${JDK_DIR}"
         PATH = "${JDK_DIR}/bin:${PATH}"
@@ -54,7 +45,6 @@ pipeline {
                     echo "🔍 [GATEWAY] Rama detectada: ${env.BRANCH_NAME}"
                     echo "🌍 [GATEWAY] Entorno: ${env.ENV}"
 
-                    // Lógica de despliegue automático por rama
                     if (env.BRANCH_NAME == 'dev') {
                         echo "🚀 [GATEWAY] ESTRATEGIA: Deploy automático a DEV"
                         env.DEPLOY_STRATEGY = 'auto'
@@ -177,7 +167,7 @@ pipeline {
             }
         }
 
-        stage('🚀 Deploy API Gateway') {
+        stage('🚀 Deploy API Gateway with Systemd') {
             when {
                 anyOf {
                     environment name: 'DEPLOY_STRATEGY', value: 'auto'
@@ -188,7 +178,6 @@ pipeline {
                 script {
                     def EC2_IP = ''
 
-                    // Determinar IP según entorno
                     if (env.TARGET_ENV == 'prod') {
                         EC2_IP = env.EC2_IP_PROD
                     } else if (env.TARGET_ENV == 'qa') {
@@ -199,11 +188,13 @@ pipeline {
 
                     echo "🚀 [GATEWAY] Desplegando en ${env.TARGET_ENV.toUpperCase()} (${EC2_IP})"
 
-                    // Preparar servidor
+                    // 1. Preparar servidor
                     sh """
                     echo "🔧 [GATEWAY] Preparando servidor..."
                     ssh -i \$SSH_KEY -o StrictHostKeyChecking=no -o ConnectTimeout=30 ${EC2_USER}@${EC2_IP} '
-                        mkdir -p ${REMOTE_PATH}
+                        # Crear directorios
+                        sudo mkdir -p ${REMOTE_PATH}
+                        sudo chown -R ubuntu:ubuntu ${REMOTE_PATH}
 
                         # Instalar herramientas básicas
                         which curl > /dev/null || sudo apt-get update -qq && sudo apt-get install -y curl
@@ -219,164 +210,107 @@ pipeline {
                     '
                     """
 
-                    // Copiar JAR
+                    // 2. Detener servicio existente
+                    sh """
+                    echo "🛑 [GATEWAY] Deteniendo servicio existente..."
+                    ssh -i \$SSH_KEY -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_IP} '
+                        if sudo systemctl is-active --quiet api-gateway.service; then
+                            echo "🛑 Deteniendo servicio api-gateway..."
+                            sudo systemctl stop api-gateway.service
+                            sleep 5
+                        else
+                            echo "ℹ️ Servicio api-gateway no está corriendo"
+                        fi
+                    ' || echo "⚠️ [GATEWAY] No hay servicio previo o error al detener"
+                    """
+
+                    // 3. Copiar JAR
                     sh """
                     echo "📦 [GATEWAY] Copiando JAR..."
                     scp -i \$SSH_KEY -o StrictHostKeyChecking=no target/apiGateway-0.0.1-SNAPSHOT.jar ${EC2_USER}@${EC2_IP}:${REMOTE_PATH}/
                     echo "✅ [GATEWAY] JAR copiado"
                     """
 
-                    // Script de inicio para Gateway
-                    def startScript = """#!/bin/bash
-JAR_FILE="${REMOTE_PATH}/apiGateway-0.0.1-SNAPSHOT.jar"
-PID_FILE="${REMOTE_PATH}/gateway.pid"
-LOG_FILE="${REMOTE_PATH}/gateway.log"
+                    // 4. Crear archivo de servicio systemd para API Gateway
+                    def systemdService = """[Unit]
+Description=Spring Boot API Gateway
+After=network.target
+Wants=network-online.target
+After=network-online.target
 
-echo "🚀 [GATEWAY] Iniciando API Gateway..."
-
-# Verificar que Eureka esté disponible
-echo "⏳ [GATEWAY] Verificando conexión con Eureka..."
-EUREKA_AVAILABLE=false
-for i in {1..30}; do
-    if curl -f http://localhost:${EUREKA_PORT}/actuator/health > /dev/null 2>&1; then
-        echo "✅ [GATEWAY] Eureka disponible en puerto ${EUREKA_PORT}"
-        EUREKA_AVAILABLE=true
-        break
-    fi
-    echo "⏳ [GATEWAY] Esperando Eureka... (\$i/30)"
-    sleep 10
-done
-
-if [ "\$EUREKA_AVAILABLE" = false ]; then
-    echo "❌ [GATEWAY] Error: Eureka no está disponible en puerto ${EUREKA_PORT}"
-    echo "🔍 [GATEWAY] Verificando si Eureka está corriendo..."
-    netstat -tuln | grep :${EUREKA_PORT} || echo "❌ Puerto ${EUREKA_PORT} no está en uso"
-    exit 1
-fi
-
-# Detener proceso existente
-if [ -f \$PID_FILE ]; then
-    PID=\$(cat \$PID_FILE)
-    if ps -p \$PID > /dev/null; then
-        echo "🛑 [GATEWAY] Deteniendo proceso existente (PID: \$PID)"
-        kill \$PID
-        sleep 10
-
-        # Force kill si sigue corriendo
-        if ps -p \$PID > /dev/null; then
-            echo "🔨 [GATEWAY] Force killing process"
-            kill -9 \$PID
-            sleep 5
-        fi
-    fi
-    rm -f \$PID_FILE
-fi
-
-# Verificar puerto libre
-if netstat -tuln | grep :${GATEWAY_PORT} > /dev/null; then
-    echo "⚠️ [GATEWAY] Puerto ${GATEWAY_PORT} en uso, intentando liberar..."
-    sudo fuser -k ${GATEWAY_PORT}/tcp || true
-    sleep 5
-fi
-
-# Iniciar Gateway
-echo "🎬 [GATEWAY] Iniciando en puerto ${GATEWAY_PORT}..."
-nohup java -jar \$JAR_FILE \\
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=${REMOTE_PATH}
+ExecStart=/usr/bin/java -jar ${REMOTE_PATH}/apiGateway-0.0.1-SNAPSHOT.jar \\
     --spring.profiles.active=${ENV} \\
     --server.port=${GATEWAY_PORT} \\
-    --eureka.client.service-url.defaultZone=http://localhost:${EUREKA_PORT}/eureka \\
     --logging.level.root=INFO \\
     --logging.level.org.springframework.cloud.gateway=DEBUG \\
-    --spring.cloud.gateway.discovery.locator.enabled=true \\
-    > \$LOG_FILE 2>&1 &
+    --logging.file.name=${REMOTE_PATH}/gateway.log
 
-echo \$! > \$PID_FILE
-echo "✅ [GATEWAY] Iniciado - PID: \$(cat \$PID_FILE), Puerto: ${GATEWAY_PORT}"
+# Configuración de reinicio
+Restart=on-failure
+RestartSec=15
+SuccessExitStatus=143
 
-# Mostrar estado inicial
-sleep 15
-if ps -p \$(cat \$PID_FILE) > /dev/null; then
-    echo "✅ [GATEWAY] Proceso corriendo correctamente"
-else
-    echo "❌ [GATEWAY] Error al iniciar - Ver logs:"
-    tail -30 \$LOG_FILE
-    exit 1
-fi
-"""
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=api-gateway
 
-                    // Script de control
-                    def controlScript = """#!/bin/bash
-PID_FILE="${REMOTE_PATH}/gateway.pid"
-LOG_FILE="${REMOTE_PATH}/gateway.log"
+# Seguridad
+NoNewPrivileges=true
+PrivateTmp=true
 
-case \$1 in
-    start)
-        ${REMOTE_PATH}/start-gateway.sh
-        ;;
-    stop)
-        echo "🛑 [GATEWAY] Deteniendo servicio..."
-        if [ -f \$PID_FILE ]; then
-            PID=\$(cat \$PID_FILE)
-            if ps -p \$PID > /dev/null; then
-                kill \$PID
-                echo "✅ [GATEWAY] Proceso detenido"
-            fi
-            rm -f \$PID_FILE
-        else
-            echo "⚠️ [GATEWAY] No hay proceso corriendo"
-        fi
-        ;;
-    status)
-        echo "📊 [GATEWAY] Estado del servicio:"
-        if [ -f \$PID_FILE ]; then
-            PID=\$(cat \$PID_FILE)
-            if ps -p \$PID > /dev/null; then
-                echo "✅ [GATEWAY] Proceso corriendo (PID: \$PID)"
-                curl -f http://localhost:${GATEWAY_PORT}/actuator/health 2>/dev/null && echo "✅ [GATEWAY] Health: OK" || echo "❌ [GATEWAY] Health: FAIL"
-                echo "🔗 [GATEWAY] Eureka connection:"
-                curl -f http://localhost:${EUREKA_PORT}/actuator/health 2>/dev/null && echo "✅ Eureka: OK" || echo "❌ Eureka: FAIL"
-            else
-                echo "❌ [GATEWAY] Proceso no encontrado"
-            fi
-        else
-            echo "❌ [GATEWAY] PID file no existe"
-        fi
-        ;;
-    logs)
-        echo "📄 [GATEWAY] Últimos logs:"
-        tail -50 \$LOG_FILE
-        ;;
-    restart)
-        \$0 stop
-        sleep 5
-        \$0 start
-        ;;
-    routes)
-        echo "🛣️ [GATEWAY] Rutas disponibles:"
-        curl -s http://localhost:${GATEWAY_PORT}/actuator/gateway/routes | jq '.' 2>/dev/null || curl -s http://localhost:${GATEWAY_PORT}/actuator/gateway/routes
-        ;;
-    *)
-        echo "Uso: \$0 {start|stop|status|logs|restart|routes}"
-        ;;
-esac
-"""
+# Variables de entorno
+Environment=JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+Environment=SPRING_PROFILES_ACTIVE=${ENV}
 
-                    // Crear scripts
+[Install]
+WantedBy=multi-user.target"""
+
+                    // 5. Configurar servicio systemd
                     sh """
-                    echo "📝 [GATEWAY] Creando scripts de control..."
-                    echo '${startScript}' | ssh -i \$SSH_KEY -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_IP} 'cat > ${REMOTE_PATH}/start-gateway.sh'
-                    echo '${controlScript}' | ssh -i \$SSH_KEY -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_IP} 'cat > ${REMOTE_PATH}/gateway-control.sh'
+                    echo "⚙️ [GATEWAY] Configurando servicio systemd..."
 
+                    # Crear archivo de servicio
+                    echo '${systemdService}' | ssh -i \$SSH_KEY -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_IP} 'sudo tee /etc/systemd/system/api-gateway.service > /dev/null'
+
+                    # Configurar systemd
                     ssh -i \$SSH_KEY -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_IP} '
-                        chmod +x ${REMOTE_PATH}/start-gateway.sh
-                        chmod +x ${REMOTE_PATH}/gateway-control.sh
+                        # Recargar configuración
+                        sudo systemctl daemon-reload
+
+                        # Habilitar servicio para auto-inicio
+                        sudo systemctl enable api-gateway.service
+
+                        echo "✅ [GATEWAY] Servicio systemd configurado"
                     '
                     """
 
-                    // Ejecutar deploy
+                    // 6. Iniciar servicio
                     sh """
-                    echo "🚀 [GATEWAY] Ejecutando deploy..."
-                    ssh -i \$SSH_KEY -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_IP} '${REMOTE_PATH}/gateway-control.sh start'
+                    echo "🚀 [GATEWAY] Iniciando servicio..."
+                    ssh -i \$SSH_KEY -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_IP} '
+                        # Iniciar servicio
+                        sudo systemctl start api-gateway.service
+
+                        # Esperar un momento
+                        sleep 5
+
+                        # Verificar estado
+                        if sudo systemctl is-active --quiet api-gateway.service; then
+                            echo "✅ [GATEWAY] Servicio iniciado correctamente"
+                            sudo systemctl status api-gateway.service --no-pager -l
+                        else
+                            echo "❌ [GATEWAY] Error al iniciar servicio"
+                            sudo systemctl status api-gateway.service --no-pager -l
+                            sudo journalctl -u api-gateway.service --since \"5 minutes ago\" --no-pager
+                            exit 1
+                        fi
+                    '
                     """
 
                     echo "✅ [GATEWAY] Deploy completado en ${env.TARGET_ENV.toUpperCase()}!"
@@ -406,39 +340,42 @@ esac
                     echo "🔍 [GATEWAY] Verificando deploy en ${env.TARGET_ENV.toUpperCase()}..."
 
                     // Esperar que el servicio esté listo
-                    sh "sleep 90"
+                    sh "sleep 30"
 
                     // Verificar health
                     sh """
-                    echo "🏥 [GATEWAY] Verificando health endpoint..."
+                    echo "🏥 [GATEWAY] Verificando servicio..."
 
-                    # Verificar proceso
-                    ssh -i \$SSH_KEY -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_IP} '${REMOTE_PATH}/gateway-control.sh status'
+                    ssh -i \$SSH_KEY -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_IP} '
+                        # Verificar estado del servicio
+                        echo "📊 Estado del servicio:"
+                        sudo systemctl status api-gateway.service --no-pager
 
-                    # Verificar health endpoint
-                    for i in {1..15}; do
-                        if ssh -i \$SSH_KEY -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_IP} 'curl -f http://localhost:${GATEWAY_PORT}/actuator/health' 2>/dev/null; then
-                            echo "✅ [GATEWAY] Health Check: PASSED"
-                            break
+                        # Verificar que esté habilitado para auto-inicio
+                        if sudo systemctl is-enabled api-gateway.service; then
+                            echo "✅ [GATEWAY] Servicio habilitado para auto-inicio"
+                        else
+                            echo "⚠️ [GATEWAY] Servicio NO habilitado para auto-inicio"
                         fi
-                        echo "⏳ [GATEWAY] Esperando health endpoint... (\$i/15)"
-                        sleep 10
-                    done
 
-                    # Verificar rutas registradas
-                    echo "🛣️ [GATEWAY] Verificando rutas registradas..."
-                    ssh -i \$SSH_KEY -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_IP} 'curl -s http://localhost:${GATEWAY_PORT}/actuator/gateway/routes' || echo "⚠️ [GATEWAY] No se pudieron obtener las rutas"
+                        # Verificar health endpoint
+                        echo "🏥 Verificando health endpoint..."
+                        for i in {1..10}; do
+                            if curl -f http://localhost:${GATEWAY_PORT}/actuator/health 2>/dev/null; then
+                                echo "✅ [GATEWAY] Health Check: PASSED"
+                                break
+                            fi
+                            echo "⏳ [GATEWAY] Esperando health endpoint... (\$i/10)"
+                            sleep 10
+                        done
 
-                    # Verificar registro en Eureka
-                    echo "🔗 [GATEWAY] Verificando registro en Eureka..."
-                    if ssh -i \$SSH_KEY -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_IP} 'curl -s http://localhost:${EUREKA_PORT}/eureka/apps' | grep -q "api-gateway" 2>/dev/null; then
-                        echo "✅ [GATEWAY] Registrado en Eureka: YES"
-                    else
-                        echo "⚠️ [GATEWAY] Registrado en Eureka: PENDING"
-                    fi
+                        # Mostrar últimos logs
+                        echo "📄 Últimos logs del servicio:"
+                        sudo journalctl -u api-gateway.service --since \"2 minutes ago\" --no-pager | tail -20
+                    '
+                    """
 
                     echo "✅ [GATEWAY] Verificación completada"
-                    """
                 }
             }
         }
@@ -462,23 +399,20 @@ esac
 
 📋 Servicio desplegado:
    • API Gateway: Puerto ${GATEWAY_PORT}
-   • Eureka Connection: Puerto ${EUREKA_PORT}
    • Servidor: ${EC2_IP}
+   • Servicio systemd: api-gateway.service
 
 🌐 URLs de verificación:
    • Health: http://${EC2_IP}:${GATEWAY_PORT}/actuator/health
-   • Routes: http://${EC2_IP}:${GATEWAY_PORT}/actuator/gateway/routes
-   • Eureka: http://${EC2_IP}:${EUREKA_PORT}/
 
-🛠️ Comandos útiles:
-   • Estado: ${REMOTE_PATH}/gateway-control.sh status
-   • Logs: ${REMOTE_PATH}/gateway-control.sh logs
-   • Rutas: ${REMOTE_PATH}/gateway-control.sh routes
-   • Reiniciar: ${REMOTE_PATH}/gateway-control.sh restart
+🛠️ Comandos útiles (systemd):
+   • Estado: sudo systemctl status api-gateway.service
+   • Logs: sudo journalctl -u api-gateway.service -f
+   • Reiniciar: sudo systemctl restart api-gateway.service
+   • Detener: sudo systemctl stop api-gateway.service
+   • Iniciar: sudo systemctl start api-gateway.service
 
-⚡ Próximos pasos:
-   • Configurar microservicios para registrarse en Eureka
-   • Verificar rutas dinámicas en el Gateway
+✅ El servicio se iniciará automáticamente al reiniciar el servidor
 """
                 } else {
                     echo "✅ [GATEWAY] Compilación exitosa - Rama: ${env.BRANCH_NAME}"
@@ -497,20 +431,14 @@ esac
    • Build: ${env.BUILD_NUMBER}
    • URL: ${env.BUILD_URL}
 
-🛠️ Posibles causas:
-   • Eureka Server no disponible
-   • Puerto en uso
-   • Problemas de configuración
-
-📋 Verificar:
-   • Estado de Eureka: curl http://servidor:${EUREKA_PORT}/actuator/health
-   • Logs del Gateway: ${REMOTE_PATH}/gateway-control.sh logs
+🛠️ Para debugging:
+   • sudo systemctl status api-gateway.service
+   • sudo journalctl -u api-gateway.service
 """
         }
 
         cleanup {
             sh '''
-                # Limpiar archivos temporales
                 rm -rf jdk21.tar.gz || true
                 echo "✅ [GATEWAY] Limpieza completada"
             '''
