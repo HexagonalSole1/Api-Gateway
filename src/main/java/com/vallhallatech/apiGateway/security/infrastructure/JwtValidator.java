@@ -16,7 +16,7 @@ import java.util.Date;
 @Component
 public class JwtValidator {
 
-    @Value("${jwt.access-token-secret-key}")
+    @Value("${jwt.access-token-secret-key:TuClaveSecretaSuperSeguraDeAlMenos256BitsParaJWTTokensQueDebeSerLaMismaEnTodosLosMicroserviciosParaQueElGatewayPuedaValidarLosTokensCorrectamente}")
     private String jwtSecret;
 
     @PostConstruct
