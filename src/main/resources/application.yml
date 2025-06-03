@@ -2,7 +2,6 @@ spring:
   application:
     name: api-gateway
   profiles:
+    active: qa
 
-    active: prod
-  config:
     import: configserver:http://34.239.38.109:8888
