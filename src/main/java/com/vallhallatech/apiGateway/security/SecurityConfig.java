@@ -75,9 +75,9 @@ public class SecurityConfig {
                         .pathMatchers("/roles/**").hasRole("ADMIN")
 
                         // 🔒 Rutas que requieren cualquier usuario autenticado
-                        .pathMatchers("/api/profile/**").hasAnyRole("USER", "ADMIN")
-                        .pathMatchers("/api/users/**").hasAnyRole("USER", "ADMIN")
-                        .pathMatchers("/api/notifications/**").authenticated()
+                        .pathMatchers("/profile/**").hasAnyRole("USER", "ADMIN")
+                        .pathMatchers("/users/**").hasAnyRole("USER", "ADMIN")
+                        .pathMatchers("/notifications/**").authenticated()
 
                         //profile-service
                         .pathMatchers("/profile-service/**").authenticated()
