@@ -66,6 +66,7 @@ public class SecurityConfig {
                         // 🟢 Rutas públicas (permitir sin autenticación)
                         .pathMatchers(HttpMethod.OPTIONS).permitAll()
                         .pathMatchers("/auth-service/auth/**", "/public/**").permitAll()
+                        .pathMatchers("/auth-service/users/**", "/public/**").permitAll()
                         .pathMatchers("/actuator/health", "/actuator/info", "/actuator/**").permitAll()
                         .pathMatchers(HttpMethod.GET,"/product-service/products/**").permitAll()
 
