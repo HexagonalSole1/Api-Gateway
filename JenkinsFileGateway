@@ -28,7 +28,7 @@ pipeline {
         EC2_USER = 'ubuntu'
         EC2_IP_DEV = '35.168.222.61'
         EC2_IP_QA = '54.161.193.236'
-        EC2_IP_PROD = '52.207.220.99'
+        EC2_IP_PROD = '18.205.163.6'
 
         REMOTE_PATH = '/home/ubuntu/api-gateway'
         SSH_KEY = credentials('ssh-key-ec2')
